@@ -1,0 +1,74 @@
+# Deploy application with Terraform
+parameters:
+  name: 'deploy'
+  appName: ''
+  env: ''
+  location: ''
+  department: ''
+  storagePrefix: ''
+  containerRegistry: ''
+  dependsOn: ''
+  condition: ''
+  vmImageName: ''
+  armServiceSubscription: ''
+
+stages:
+- stage: ${{ parameters.name }}
+  displayName: 'Deploy to ${{ parameters.env }}'
+  dependsOn: ${{ parameters.dependsOn }}
+  condition: ${{ parameters.condition }}
+  variables:
+    appNameEnv: '${{ parameters.appName }}-${{ parameters.env }}'
+    storageAccount: '${{ parameters.storagePrefix }}${{ parameters.appName }}${{ parameters.env }}'
+    dbAdminUserName: '${{ parameters.appName }}${{ parameters.env }}admin'
+  jobs:
+  - deployment: deploy_${{ parameters.env }}
+    pool:
+      vmImage: ${{ parameters.vmImageName }}
+    environment: '$(appNameEnv)'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          # Checkout the repo
+          - checkout: self
+            displayName: 'Checkout source repo'
+          # Move the terraform files to the working directory
+          - script: 'mv cd/* ./'
+            displayName: 'Move Terraform files to working dir'
+          # Get the tfstate key from the Key Vault
+          - task: AzureKeyVault@1
+            inputs:
+              azureSubscription: ${{ parameters.armServiceSubscription }}
+              KeyVaultName: '$(appNameEnv)'
+              SecretsFilter: 'TfStateKey,DbAdminPw'
+          # Install Terraform
+          - task: TerraformInstaller@0
+            displayName: 'Install terraform'
+            inputs:
+              terraformVersion: '0.12.3'
+          # Terraform init
+          - task: TerraformTaskV1@0
+            displayName: 'Terraform init'
+            inputs:
+              provider: 'azurerm'
+              command: 'init'
+              backendServiceArm: ${{ parameters.armServiceSubscription }}
+              backendAzureRmResourceGroupName: '$(appNameEnv)'
+              backendAzureRmStorageAccountName: '$(storageAccount)'
+              backendAzureRmContainerName: '$(appNameEnv)-tfstate'
+              backendAzureRmKey: '$(appNameEnv).tfstate'
+          # Terraform apply
+          - task: TerraformTaskV1@0
+            displayName: 'Terraform apply'
+            inputs:
+              provider: 'azurerm'
+              command: 'apply'
+              commandOptions: -var="app_name=${{ parameters.appName }}" -var="env_name=${{ parameters.env }}" -var="az_location=${{ parameters.location }}" -var="az_container_registry=${{ parameters.containerRegistry }}" -var="az_storage_account_key=$(TfStateKey)" -var="db_admin_username=$(dbAdminUserName)" -var="db_admin_password=$(DbAdminPw)" -auto-approve
+              environmentServiceNameAzureRM: ${{ parameters.armServiceSubscription }}
+          # File cleanup
+          - task: DeleteFiles@1
+            displayName: 'Cleanup Build directory'
+            inputs:
+              SourceFolder: '$(Build.SourcesDirectory)'
+              Contents: '**'

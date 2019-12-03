@@ -1,0 +1,19 @@
+# Run Tests
+parameters:
+  name: 'test'
+  vmImageName: ''
+  testFolder: '.'
+
+stages:
+- stage: ${{ parameters.name }}
+  displayName: 'Run tests'
+  jobs:
+  - job: run_tests
+    pool:
+      vmImage: ${{ parameters.vmImageName }}
+    steps:
+    - task: DotNetCoreCLI@2
+      inputs:
+        command: 'test'
+        projects: '${{ parameters.testFolder }}/**/*.csproj'
+        testRunTitle: 'Run tests with dotnet test'

@@ -1,0 +1,101 @@
+### CI/CD Pipeline for building and deploying Dockerized ASP.NET Core Web Api using Terraform
+
+# Install Terraform pipeline module from the Azure marketplace
+# https://marketplace.visualstudio.com/items?itemName=ms-devlabs.custom-terraform-tasks
+
+# Pipelines requires two service connections, one to access the Azure Container Registry containing the docker image,
+# and one that allows terraform to manage azure resources. (see README.md)
+
+# Update these variables with the ones used when running ./scripts/3_CreateAzureTfstate.ps1
+variables:
+  #TODO: Update the name of my web app
+  appName: 'mywebapp'
+  #TODO: Update my app location in Azure
+  location: 'eastus'
+  #TODO: Update the name of my department because we tag all our azure resources with it
+  department: 'IT'
+  #TODO: Update the name of my company or use an abbreviation to use as a storage account prefix
+  storagePrefix: 'company'
+  #TODO: Update the name of my ACR
+  containerRegistry: '[myregistry].azurecr.io'
+  #TODO: Update my docker base image
+  vmImageName: 'ubuntu-latest'
+  #TODO: Create a service connection for this Devops project of type 'Azure Resource Manager'
+  armServiceSubscription: '[my-arm-service-connection-name]'
+  #TODO: Create a service connection for this project of type 'Docker Registry'
+  dockerRegistryServiceConnection: '[my-acr-service-connection-name]'
+  dockerfilePath: '$(Build.SourcesDirectory)/Dockerfile'
+
+trigger:
+  batch: true
+  branches:
+    include:
+      - master
+      - feature/*
+
+resources:
+- repo: self
+
+stages:
+
+  # Test
+- template: ci/test.yml
+  parameters:
+    name: 'test'
+    vmImageName: $(vmImageName)
+    testFolder: 'tests'
+
+  # Build
+- template: ci/build.yml
+  parameters:
+    name: 'build'
+    appName: $(appName)
+    dependsOn: 'test'
+    vmImageName: $(vmImageName)
+    dockerRegistryServiceConnection: $(dockerRegistryServiceConnection)
+    imageRepository: $(appName)
+    dockerfilePath: '$(Build.SourcesDirectory)/Dockerfile'
+    tag: '$(Build.BuildId)'
+
+  # Deploy Dev
+- template: ci/deploy.yml
+  parameters:
+    name: 'deploy_to_dev'
+    appName: $(appName)
+    env: 'dev'
+    location: $(location)
+    department: $(department)
+    storagePrefix: $(storagePrefix)
+    containerRegistry: $(containerRegistry)
+    dependsOn: 'build'
+    vmImageName: $(vmImageName)
+    armServiceSubscription: $(armServiceSubscription)
+
+  # Deploy QA
+  #TODO: Clone this block and change all the "qa"s to something else if you want more environments (i.e. demo, staging, dev2, etc)
+- template: ci/deploy.yml
+  parameters:
+    name: 'deploy_to_qa'
+    appName: $(appName)
+    env: 'qa'
+    location: $(location)
+    department: $(department)
+    storagePrefix: $(storagePrefix)
+    containerRegistry: $(containerRegistry)
+    dependsOn: 'deploy_to_dev'
+    vmImageName: $(vmImageName)
+    armServiceSubscription: $(armServiceSubscription)
+
+  # Deploy Prod
+- template: ci/deploy.yml
+  parameters:
+    name: 'deploy_to_prod'
+    appName: $(appName)
+    env: 'prod'
+    location: $(location)
+    department: $(department)
+    storagePrefix: $(storagePrefix)
+    containerRegistry: $(containerRegistry)
+    dependsOn: 'deploy_to_qa'
+    vmImageName: $(vmImageName)
+    armServiceSubscription: $(armServiceSubscription)
